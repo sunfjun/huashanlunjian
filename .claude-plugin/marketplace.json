@@ -10,10 +10,10 @@
       "source": {
         "source": "url",
         "url": "https://github.com/sunfjun/huashanlunjian.git",
-        "sha": "764a6ec06d0673c6ecdf98dc8f464af649ae7e93"
+        "sha": "add6073010537152dcb2ba0b8f6d07391c94067b"
       },
       "description": "华山论剑 — Multi-AI role debate plugin for generating high-quality proposals. Multiple AI roles (林黛玉, 诸葛亮, 孙悟空, 王熙凤) review and challenge proposals from different perspectives until consensus is reached.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": {
         "name": "Mark",
         "email": "sunfjun@gmail.com"
