@@ -1,17 +1,17 @@
-# Symposion
+# Agora
 
 > Multi-AI role debate plugin for Claude Code — generate high-quality proposals through structured multi-perspective discussion.
 
 ## Overview
 
-Symposion assembles multiple AI roles to review your proposal from different perspectives, refining it through multiple rounds of debate until consensus is reached.
+Agora assembles multiple AI roles to review your proposal from different perspectives, refining it through multiple rounds of debate until consensus is reached.
 
 - 🎭 **Momus** — Devil's advocate: challenges assumptions, finds security risks and extreme scenarios
 - 🔮 **Cassandra** — Detail insight: catches overlooked edge cases, boundary conditions and subtle flaws
 - 🦉 **Athena** — Strategic architecture: reviews global design, scalability and long-term impact
 - ⚒️ **Hephaestus** — Execution feasibility: evaluates implementability, resources and schedule risks
 
-> *"Symposion assembles four irreplaceable perspectives — the critic's eye, the prophet's voice, the strategist's judgment, the craftsman's hand."*
+> *"Agora assembles four irreplaceable perspectives — the critic's eye, the prophet's voice, the strategist's judgment, the craftsman's hand."*
 
 Discussion runs automatically until all roles reach consensus (up to N rounds), with the full process written to file for review.
 
@@ -26,7 +26,7 @@ In Claude Code, run the following commands:
 /plugin marketplace add ClaudeWorksHub/claude-plugins
 
 # 2. Install plugin
-/plugin install symposion@claudeworkshub
+/plugin install agora@claudeworkshub
 
 # 3. Activate
 /reload-plugins
@@ -36,16 +36,16 @@ To update to the latest version:
 
 ```bash
 /plugin marketplace update claudeworkshub
-/plugin install symposion@claudeworkshub
+/plugin install agora@claudeworkshub
 /reload-plugins
 ```
 
 ### Local development
 
-Copy the `symposion/` directory to `~/.claude/plugins/`:
+Copy the `agora/` directory to `~/.claude/plugins/`:
 
 ```bash
-cp -r symposion ~/.claude/plugins/
+cp -r agora ~/.claude/plugins/
 ```
 
 Or configure the plugin path in your project's `.claude/settings.local.json`.
@@ -55,31 +55,31 @@ Or configure the plugin path in your project's `.claude/settings.local.json`.
 ### Basic
 
 ```
-/symposion:proposal Design a user authentication system
+/agora:proposal Design a user authentication system
 ```
 
 ### Select roles
 
 ```
-/symposion:proposal --roles athena,momus Design a caching system
+/agora:proposal --roles athena,momus Design a caching system
 ```
 
 ### Exclude roles
 
 ```
-/symposion:proposal --exclude hephaestus Design a notification system
+/agora:proposal --exclude hephaestus Design a notification system
 ```
 
 ### Set max rounds
 
 ```
-/symposion:proposal --max-rounds 5 Design a notification system
+/agora:proposal --max-rounds 5 Design a notification system
 ```
 
 ### Combined
 
 ```
-/symposion:proposal --roles cassandra,athena --max-rounds 8 Design an API gateway
+/agora:proposal --roles cassandra,athena --max-rounds 8 Design an API gateway
 ```
 
 ## Parameters

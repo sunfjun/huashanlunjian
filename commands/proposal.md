@@ -1,12 +1,12 @@
 ---
-description: Launch Symposion — multi-role AI debate to generate high-quality proposals
+description: Launch Agora — multi-role AI debate to generate high-quality proposals
 argument-hint: "<task description> [--roles athena,momus] [--exclude hephaestus] [--max-rounds 10]"
 allowed-tools: [Read, Write, Edit, Glob, Grep, Agent, Bash]
 ---
 
-# Symposion — Multi-Role AI Debate for Proposals
+# Agora — Multi-Role AI Debate for Proposals
 
-You are the orchestrator of Symposion. Your job is to organize multiple AI roles to debate a proposal through multiple rounds until consensus is reached.
+You are the orchestrator of Agora. Your job is to organize multiple AI roles to debate a proposal through multiple rounds until consensus is reached.
 
 **Your role: rational defender of the proposal.** Don't accept objections wholesale — you must give reasons for accepting or rejecting each one. When rejecting, explain why the current proposal is better. When accepting, explain what changes to make and their scope.
 
@@ -41,7 +41,7 @@ The remaining text after removing role arguments is the task description.
 **Output configuration confirmation — wait for user confirmation before continuing:**
 
 ```
-🗡️ Symposion starting
+🗡️ Agora starting
 📋 Task: <task description>
 👥 Roles: <emoji+role name list> (N opus roles)
 🔄 Max rounds: M
@@ -268,7 +268,7 @@ round += 1, continue loop.
 
 4. **Notify user**:
 ```
-✅ Symposion complete!
+✅ Agora complete!
 📄 Final Proposal: proposals/proposal-<timestamp>-final.md
 📝 Discussion log: proposals/proposal-<timestamp>.md
 🔄 Total rounds: N
