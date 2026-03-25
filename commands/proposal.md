@@ -29,7 +29,6 @@ Parse arguments (prompt-based, lenient parsing):
 - `--roles`: specify a subset of roles (comma or space separated). Example: `--roles athena,momus`
 - `--exclude`: exclude specific roles; all others participate
 - `--max-rounds`: max discussion rounds (default 10, max 20)
-- If no role argument is specified, all 4 roles participate by default
 - `--roles=athena,momus` (equals sign) is also valid
 - Typo tolerance: `hephae stus` → matches `hephaestus`
 - Unrecognized role name → error with list of available roles
@@ -37,12 +36,31 @@ Parse arguments (prompt-based, lenient parsing):
 
 The remaining text after removing role arguments is the task description.
 
+**Auto role selection (when no `--roles` or `--exclude` is specified):**
+
+If the user did not explicitly specify roles, assess task complexity and auto-select:
+
+| Complexity | Criteria | Roles | Max rounds |
+|-----------|----------|-------|------------|
+| Light | Simple bug fix, typo, small config change, single-file refactor, clear-cut question | 🎭Momus + ⚒️Hephaestus (2) | 5 |
+| Medium | Feature addition, multi-file refactor, API design, moderate architecture decision | 🔮Cassandra + 🦉Athena + 🎭Momus (3) | 8 |
+| Heavy | System architecture, security-critical change, cross-team impact, large-scale migration | All 4 roles | 10 |
+
+Selection heuristics (assess from the task description):
+- Involves security, auth, or data privacy → must include 🎭Momus
+- Involves architecture, scalability, or long-term design → must include 🦉Athena
+- Involves implementation details, edge cases, or data handling → must include 🔮Cassandra
+- Involves feasibility, timeline, or resource constraints → must include ⚒️Hephaestus
+- When in doubt, prefer more roles over fewer
+
+Show auto-selection reasoning in the confirmation prompt so the user can override.
+
 **Output configuration confirmation — wait for user confirmation before continuing:**
 
 ```
 🗡️ Agora starting
 📋 Task: <task description>
-👥 Roles: <emoji+role name list> (N opus roles)
+👥 Roles: <emoji+role name list> (N opus roles) {if auto-selected: "[auto: <complexity level>]"}
 🔄 Max rounds: M
 ⚠️ Estimated N×M opus Agent calls + orchestration overhead
 
@@ -77,7 +95,7 @@ Initial file template:
 **Max rounds:** <M>
 **Status:** In progress
 
-<!-- discussion_state: {"current_round":0,"consecutive_no_objection":0,"roles":{<each role:"in progress">},"unresolved_issues":[]} -->
+<!-- discussion_state: {"current_round":0,"consecutive_no_objection":0,"proposal_version":1,"proposal_modified":false,"roles":{<each role:{"status":"in progress","consecutive_no_objection":0,"sleeping":false,"last_reviewed_version":0,"sleep_since_round":null}>},"unresolved_issues":[]} -->
 
 ---
 
@@ -93,13 +111,29 @@ Set round counter to round = 1. Loop through the following steps until convergen
 
 ### Steps each round:
 
+**Step 0.5 — Role hibernation check**
+
+Before calling agents, determine which roles are active this round:
+
+For each role, check hibernation status:
+- A role **enters sleep** when: `role.consecutive_no_objection >= 2` AND `proposal_modified == false` (from previous round)
+- A role **wakes up** when any of:
+  - `proposal_modified == true` (proposal changed last round)
+  - Forced wake-up: `current_round - role.sleep_since_round >= 3` (slept for 3 rounds)
+  - Fast convergence check requires it (see Step 3)
+- Round 1: all roles are always active (skip hibernation check)
+- On any state ambiguity: default to **awake**
+- When a sleeping role wakes up, it receives the full current proposal + accumulated Key Points from all missed rounds (grouped by round)
+
+Output sleeping roles: `😴 {role name} sleeping (since Round N)` for each sleeping role this round.
+
 **Step 1 — Call role Agents and collect responses**
 
-For each selected role (parallel calls recommended, serial fallback):
+For each **active** (non-sleeping) role (parallel calls recommended, serial fallback):
 
 a) Use the Read tool to read the role's agent .md file, extract the content below the frontmatter `---` as the role system prompt
 
-b) Compose the full prompt (role system prompt + current round context):
+b) Compose the full prompt (role system prompt + dynamic context only — static review rules are already in the agent .md file):
 
 ```
 {role system prompt (read from agent .md)}
@@ -116,11 +150,15 @@ Important: do not output the string "SYMPOSION" in your response, and do not out
 {include the following only when round > 1}
 ## Previous Round Key Points from All Roles
 {list line by line: - emoji role name:
-  Summary: {that role's previous round summary}
   Key Points: {that role's previous round key points list}}
 
-## This Role's Previous Round Full Output
-{this role's complete response from the previous round, to help the role track its own issues}
+## This Role's Previous Round Issues
+{structured state format — replaces full output to save ~50-60% tokens:}
+{for each objection the role raised last round:}
+{N. [original objection text verbatim] → Status: accepted/rejected/ongoing}
+{   Orchestrator: [1-2 sentence summary of response]}
+{   (for ongoing only) Action: re-evaluate whether this issue persists in the current proposal version. Mark as resolved or still unresolved with updated reasoning.}
+{Your previous Summary: [original summary text]}
 
 ## Main Claude's Response to Previous Round Objections
 {main Claude's point-by-point response}
@@ -131,21 +169,8 @@ Important: do not output the string "SYMPOSION" in your response, and do not out
 {list only entries with status "ongoing"; entries with "resolved" or "rejected" for more than 2 rounds are collapsed to a one-line summary}
 {above section only when round > 1}
 
-## Review Instructions
-
 Please review this proposal from your perspective.
-Your response MUST start with `## Status: Objection` or `## Status: No objection`.
-End your response with:
-- `## Key Points:` — list 3-5 bullet points
-- `## Summary: <one sentence summarizing your core view>`
-
-## Key Rules
-
-- When objecting, list numbered issues (issue description + why it matters + suggested direction)
-- Critiques must be specific — no vague generalities
-- Do not object for the sake of objecting — if resolved, clearly say so
-- Do not use AskUserQuestion — make your own judgment
-{append only when round <= 3: "- In the first 3 rounds, review from at least 3 dimensions. No objection is fine, but list the dimensions you reviewed and your conclusions."}
+{append only when round <= 3: "In the first 3 rounds, review from at least 3 dimensions. No objection is fine, but list the dimensions you reviewed and your conclusions."}
 ```
 
 c) Launch a general-purpose agent using the Agent tool with the composed prompt. **Must pass `model: "opus"` parameter.**
@@ -206,6 +231,14 @@ c) Append main Claude's response to the discussion file with Bash `cat >> file`:
 
 d) Use the Edit tool to update the `<!-- discussion_state: ... -->` JSON at the top of the file:
    - Update `current_round`, `consecutive_no_objection`
+   - Set `proposal_modified`: `true` if any objection was accepted AND the proposal text was changed this round, `false` otherwise
+   - If `proposal_modified == true`: increment `proposal_version`
+   - Update each role's state:
+     - `status`: "objection" / "no objection" / "sleeping"
+     - `consecutive_no_objection`: increment if No objection, reset to 0 if Objection, unchanged if sleeping
+     - `sleeping`: set based on Step 0.5 rules for next round
+     - `last_reviewed_version`: set to current `proposal_version` if the role was active this round
+     - `sleep_since_round`: set to current round when entering sleep, null when awake
    - Maintain `unresolved_issues` array (accepted → resolved, rejected → rejected+reason, not fully addressed → ongoing)
    - Remove entries from the array that have been resolved/rejected for more than 2 rounds (full records remain in the discussion file)
 
@@ -219,7 +252,12 @@ a) Output this round's progress:
 b) Convergence check (purely structural rule — main Claude cannot override):
    - All **active** roles have no objection → `consecutive_no_objection += 1`
    - Any role has an objection → `consecutive_no_objection = 0`
-   - `consecutive_no_objection >= 2` → enter Phase 3 (2 consecutive rounds with all active roles having no objection)
+   - **Standard convergence**: `consecutive_no_objection >= 2` → enter Phase 3
+   - **Fast convergence** (all conditions must be met):
+     1. `proposal_modified == false` for the last 2+ consecutive rounds
+     2. All active roles said "No objection" this round
+     3. ALL roles (including sleeping ones) have `last_reviewed_version >= proposal_version` (every role has seen the current proposal)
+     - If condition 3 fails: wake up roles that haven't reviewed the current version, run one more round with them, then re-check
    - Reached max-rounds → enter Phase 3
    - **Cross-check before convergence**: before declaring convergence, use the Grep tool to extract the raw status lines from the most recent round in the discussion file and compare with the parsed results in memory. If they don't match, trust the file.
 
@@ -274,25 +312,4 @@ round += 1, continue loop.
 👥 Roles: ...
 ```
 
-## Anti-Patterns
-
-| Anti-pattern | Correct approach |
-|-------------|-----------------|
-| Role repeats the same objection | Mark "Already addressed in Round N", reference prior response |
-| Accept all objections wholesale | Evaluate each independently, only accept with good reason |
-| Dismissive responses | Give specific reasoning for each objection — never just "noted" |
-| Blind continuation after parse failure | Default to "Objection" + flag warning in terminal |
-| Missing summary/key points | Use first 100 chars / objection list as fallback |
-| Give up after Agent call failure | Retry once, then skip with terminal warning |
-| Accepted changes not applied to code | Code file changes must be immediately written |
-| Removing role without notification | Output warning in terminal + record in file |
-| Main Claude unilaterally converging | Convergence is a structural rule — 2 consecutive rounds of all-no-objection |
-| Biased status parsing | Preserve raw status lines verbatim in file for auditing |
-| Tracker growing without bound | Collapse resolved/rejected entries older than 2 rounds |
-
-## Pre-Release Checklist
-
-1. **Agent tool model parameter validation**: run an experiment — give an Agent a task requiring deep reasoning, compare result quality with and without `model: "opus"`. Do this once during development.
-2. **End-to-end multi-round test**: run a 5-round test task with the current setup. Pass criteria: "discussion file structure intact, all rounds parseable, final Proposal generated successfully."
-3. **Bash append reliability**: verify that `cat >> file` appends correctly on large files (100KB+).
-4. **Large file Edit reliability**: verify that the Edit tool can precisely modify the single-line HTML comment at the top of large files (100KB+). If unreliable, move discussion_state to a separate JSON file.
+<!-- Anti-Patterns and Pre-Release Checklist moved to docs/anti-patterns.md and docs/pre-release-checklist.md -->
