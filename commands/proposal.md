@@ -46,16 +46,17 @@ If the user did not explicitly specify roles, assess task complexity and auto-se
 
 | Complexity | Criteria | Roles | Max rounds |
 |-----------|----------|-------|------------|
-| Light | Simple bug fix, typo, small config change, single-file refactor, clear-cut question | 🎭Momus + ⚒️Hephaestus (2) | 5 |
-| Medium | Feature addition, multi-file refactor, API design, moderate architecture decision | 🔮Cassandra + 🦉Athena + 🎭Momus (3) | 8 |
+| Light (default) | Most tasks: bug fix, feature addition, refactor, config change, analysis | 🎭Momus + ⚒️Hephaestus (2) | 5 |
+| Medium | Multi-module refactor, API design, moderate architecture decision | 🔮Cassandra + 🦉Athena + 🎭Momus (3) | 8 |
 | Heavy | System architecture, security-critical change, cross-team impact, large-scale migration | All 4 roles | 10 |
 
 Selection heuristics (assess from the task description):
+- **Default to Light** unless the task clearly matches Medium or Heavy criteria
 - Involves security, auth, or data privacy → must include 🎭Momus
 - Involves architecture, scalability, or long-term design → must include 🦉Athena
 - Involves implementation details, edge cases, or data handling → must include 🔮Cassandra
 - Involves feasibility, timeline, or resource constraints → must include ⚒️Hephaestus
-- When in doubt, prefer more roles over fewer
+- When in doubt, prefer Light over Medium
 
 Show auto-selection reasoning in the confirmation prompt so the user can override.
 
