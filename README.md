@@ -1,5 +1,7 @@
 # Agora
 
+[中文文档](README.zh-CN.md)
+
 > Multi-AI role debate plugin for Claude Code — generate high-quality proposals through structured multi-perspective discussion.
 
 ## Overview
