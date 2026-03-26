@@ -21,7 +21,7 @@ You are the orchestrator of Agora. Your job is to organize multiple AI roles to 
 | Momus | 🎭 | agents/momus.md |
 | Hephaestus | ⚒️ | agents/hephaestus.md |
 
-## Phase 0: Role Selection and Argument Parsing
+## Setup: Role Selection and Argument Parsing
 
 User input: $ARGUMENTS
 
@@ -29,12 +29,15 @@ Parse arguments (prompt-based, lenient parsing):
 - `--roles`: specify a subset of roles (comma or space separated). Example: `--roles athena,momus`
 - `--exclude`: exclude specific roles; all others participate
 - `--max-rounds`: max discussion rounds (default 10, max 20)
+- `--resume <file>`: resume a previously interrupted discussion (see Resume section below)
 - `--roles=athena,momus` (equals sign) is also valid
 - Typo tolerance: `hephae stus` → matches `hephaestus`
 - Unrecognized role name → error with list of available roles
 - 0 roles → error: "⚠️ At least 1 role is required"
 
 The remaining text after removing role arguments is the task description.
+
+**If `--resume` is specified, skip the rest of Setup and Initial Proposal, and go directly to Resume.**
 
 **Auto role selection (when no `--roles` or `--exclude` is specified):**
 
@@ -63,29 +66,72 @@ Show auto-selection reasoning in the confirmation prompt so the user can overrid
 👥 Roles: <emoji+role name list> (N opus roles) {if auto-selected: "[auto: <complexity level>]"}
 🔄 Max rounds: M
 ⚠️ Estimated N×M opus Agent calls + orchestration overhead
+{if auto-selected Medium: "💡 如需可行性评估，可添加 --roles 包含 hephaestus"}
 
 Confirm? (You may adjust parameters and re-enter)
 ```
 
-Wait for user confirmation before entering Phase 1.
+Wait for user confirmation before entering Initial Proposal.
 
-## Phase 1: Initial Proposal
+## Resume (only when `--resume` is specified)
+
+When `--resume <file>` is provided (file can be either the discussion `.md` or the `.state.json`):
+
+1. **Locate both files**: derive the timestamp from the filename, then find `proposal-<timestamp>.md` and `proposal-<timestamp>.state.json` in the same directory.
+
+2. **Read the state file** (`proposal-<timestamp>.state.json`).
+
+3. **Check phase** — branch based on `state.phase`:
+   - `"init"`: The discussion barely started. Discard and start fresh (re-run from Setup).
+   - `"assessment"`: Interrupted during Independent Assessment. Grep the discussion file for `### {emoji} {角色名} 的开发计划：` markers to detect which roles completed. Compare with `assessment_completed_roles`; if inconsistent, trust the discussion file. Re-invoke only incomplete roles, then synthesize and proceed to Debate.
+   - `"debate"`: Interrupted during Debate. Proceed to step 4 below.
+   - `"final"`: Interrupted during Finalize. Re-read the latest proposal and re-run Finalize.
+
+4. **Consistency check (debate phase only)** — compare `state.current_round` with the last `## Round N` number found in the discussion file (use Grep):
+   - **Match**: state is consistent, proceed normally.
+   - **Scenario A** (state `current_round` > last round in discussion file — state is newer): The interrupt happened after writing state but before appending discussion content. **Fix:** roll back `state.current_round` to match the discussion file's last round number.
+   - **Scenario B** (last round in discussion file > state `current_round` — discussion is newer): The interrupt happened after appending discussion content but before writing state. **Fix:**
+     1. **Completeness check**: count the number of `**Status:` lines in the last round of the discussion file and compare with the number of roles in `state.roles`. If they don't match (partial round write), roll back `current_round` to the previous complete round (last round number - 1).
+     2. If complete: parse `current_round` from the discussion file, extract each role's status from `**Status: {status}**` lines. Set all other fields to conservative defaults: `consecutive_no_objection=0`, `sleeping=false`, `proposal_modified=true`.
+   - Write the corrected state back to the state file.
+
+4. **Restore context**: read the last 2 rounds from the discussion file (find `## Round N` markers). Extract the latest complete proposal from the most recent `**Updated proposal:**` section.
+
+5. **Inject decision_log**: from the state file, prepare decision history for the orchestrator context:
+   - Last 3 rounds: include full entries (round, role, issue, decision, summary)
+   - Older entries: include round, role, issue, decision only (summary omitted), aggregated by role
+
+6. **Resume Debate**: set `round = state.current_round + 1` and enter the Debate loop.
+
+7. **Output resume status**:
+```
+🔄 Resuming discussion from Round {N}
+📄 Discussion file: {file path}
+👥 Roles: {role list from state}
+📊 State: {current_round} rounds completed, proposal version {proposal_version}
+```
+
+## Initial Proposal
 
 1. **Determine task type**:
-   - Code-related tasks (involving files/modules/APIs) → first explore the codebase with Read/Glob/Grep (≤3 calls), then generate the proposal based on code context
+   - Code-related tasks (involving files/modules/APIs) → deeply explore the codebase with Read/Glob/Grep (use as many calls as needed), understand existing patterns, conventions, dependencies, and the full context before proposing anything
    - Non-code tasks → generate the proposal directly
 
 2. **Generate initial proposal** (suggested structure, adapt to task):
    - Background and goals
-   - Proposal design
-   - Implementation steps
+   - Code context (for code-related tasks): relevant files, current architecture, existing patterns
+   - Proposal design — for code tasks, include specific files to modify, function-level changes, and code snippets
+   - Implementation steps — ordered by dependency, with concrete file paths
+   - Test plan (for code tasks): what tests to add or modify
    - Potential risks
 
 3. **Create discussion file**:
    - Use the Write tool to create `proposals/proposal-<YYYYMMDD-HHmmss>.md` (the Write tool will create the directory if needed)
    - Write file header metadata + initial proposal
 
-Initial file template:
+Initial files:
+
+**Discussion file** (`proposals/proposal-<YYYYMMDD-HHmmss>.md`):
 
 ```markdown
 # Proposal: <task title>
@@ -94,7 +140,7 @@ Initial file template:
 **Max rounds:** <M>
 **Status:** In progress
 
-<!-- discussion_state: {"current_round":0,"consecutive_no_objection":0,"proposal_version":1,"proposal_modified":false,"roles":{<each role:{"status":"in progress","consecutive_no_objection":0,"sleeping":false,"last_reviewed_version":0,"sleep_since_round":null}>},"unresolved_issues":[]} -->
+<!-- state_file: proposal-<YYYYMMDD-HHmmss>.state.json -->
 
 ---
 
@@ -104,7 +150,116 @@ Initial file template:
 <initial proposal content>
 ```
 
-## Phase 2: Multi-Round Discussion
+**State file** (`proposals/proposal-<YYYYMMDD-HHmmss>.state.json`) — use the Write tool to create:
+
+```json
+{
+  "phase": "init",
+  "assessment_completed_roles": [],
+  "current_round": 0,
+  "consecutive_no_objection": 0,
+  "proposal_version": 1,
+  "proposal_modified": false,
+  "roles": {
+    "<role_name>": {
+      "status": "in progress",
+      "consecutive_no_objection": 0,
+      "sleeping": false,
+      "last_reviewed_version": 0,
+      "sleep_since_round": null
+    }
+  },
+  "unresolved_issues": [],
+  "decision_log": []
+}
+```
+
+## Independent Assessment (after Initial Proposal, before Debate)
+
+After creating the discussion file and initial proposal, proceed to Independent Assessment. This phase lets each agent independently explore the codebase and produce a development plan from their unique perspective.
+
+**1. Update state:** Set `"phase": "assessment"` in the state file.
+
+**2. Parallel agent calls:** Launch all participating roles in parallel. Each agent receives the following prompt (NOT Review Rules — this is a planning phase, not a review phase):
+
+```
+{role system prompt (read from agent .md)}
+
+---
+
+Respond in the same language as the task description.
+
+You are participating in the **Independent Assessment** phase of a development task. Your job is to **independently explore the codebase** and produce a development plan from your role's perspective.
+
+You may freely use markdown headings to organize your output. This phase does NOT use Review Rules (no Status/Objection format required).
+
+**Task description:** {user's task description}
+
+**Orchestrator's initial code analysis:**
+{key files, project structure, and relevant code identified in Initial Proposal}
+
+**Requirements:**
+1. Use Read/Glob/Grep to independently explore the codebase — do not rely solely on the orchestrator's analysis
+2. Evaluate this task from your role's perspective ({role description})
+3. Output your development plan in the following format:
+
+## Code Assessment ({role name} perspective)
+
+### 1. Current Code Analysis
+- Which files you read (with file paths and line numbers)
+- Your judgment of existing architecture/patterns
+- Key code points relevant to the task
+
+### 2. Development Plan
+- Specific files and functions to modify
+- Code-level change descriptions (with code snippets)
+- New files/modules (if any)
+
+### 3. Risks and Recommendations
+- Risks identified from your role's perspective
+- Suggested mitigations
+
+### 4. Implementation Priority
+- Suggested implementation order with reasoning
+```
+
+**3. Collect and write to discussion file:** After all agents respond, append their plans to the discussion file in fixed role order:
+
+```
+## Independent Assessment
+
+### {emoji} {role name} 的开发计划：
+{agent's full output}
+
+### {emoji} {role name} 的开发计划：
+{agent's full output}
+...
+```
+
+**4. Synthesize v2 proposal:** The orchestrator merges all role plans into a unified v2 proposal using these rules:
+
+- **Union of changes:** Collect all file changes proposed by all roles into a complete list
+- **Conflict arbitration:**
+  - Architecture conflicts → Athena's judgment takes priority
+  - Feasibility/effort conflicts → Hephaestus's judgment takes priority
+  - Security conflicts → Momus's judgment takes priority
+  - Edge cases/testing → Cassandra's judgment takes priority
+  - **Cross-dimension fallback:** When a conflict spans multiple dimensions, orchestrator uses judgment and documents the conflict point and reasoning in the discussion file
+- **Output:** Generate a unified v2 proposal using the standard Initial Proposal format
+- **Context management:** Original role plans are preserved in the discussion file; orchestrator context only retains the synthesized v2
+
+**5. Write v2 as Round 1:** Append the synthesized v2 proposal to the discussion file as `## Round 1 / ### 💡 Claude:`.
+
+**6. Update state:** Set `"phase": "debate"`, update `assessment_completed_roles` to include all completed roles. Write state file **after** writing the discussion file.
+
+**Error handling:**
+- Agent call fails → retry once
+- Still fails → skip that role, synthesize with available plans
+- All agents fail → skip Independent Assessment entirely, use the Initial Proposal as-is and enter Debate
+
+**7. Proceed to Debate.**
+
+## Debate: Multi-Round Discussion
 
 Set round counter to round = 1. Loop through the following steps until convergence or max-rounds:
 
@@ -132,15 +287,27 @@ For each **active** (non-sleeping) role (parallel calls recommended, serial fall
 
 a) Use the Read tool to read the role's agent .md file, extract the content below the frontmatter `---` as the role system prompt
 
-b) Compose the full prompt (role system prompt + dynamic context only — static review rules are already in the agent .md file):
+b) Compose the full prompt (role system prompt + review rules injected by orchestrator + dynamic context):
 
 ```
 {role system prompt (read from agent .md)}
+
+## Review Rules
+
+- Every response MUST start with `## Status: Objection` or `## Status: No objection`
+- When objecting, list numbered issues (issue description + why it matters + suggested direction)
+- Critiques must be specific — no vague generalities
+- Do not object for the sake of objecting — if resolved, clearly say so
+- End every response with `## Key Points:` (3-5 bullet points) and `## Summary: <one sentence>`
+- Do NOT use markdown headings (`#`/`##`/`###`) in the body — only `## Status:`, `## Key Points:`, and `## Summary:` are allowed as headings
+- You are a subagent. You cannot use AskUserQuestion. You must complete the review independently and make your own judgments.
 
 ---
 
 Respond in the same language as the task description.
 Important: do not output the string "SYMPOSION" in your response, and do not output "_HLJI_APPEND_END_" on a line by itself.
+
+**When the proposal involves code changes, you MUST use your tools (Read, Glob, Grep) to read the actual source code before reviewing.** Do not review based on proposal text alone — verify file paths, function signatures, and existing behavior against the real codebase. Your review should reference specific files and line numbers.
 
 ## Current Proposal
 
@@ -187,7 +354,7 @@ a) **Parse first** (based on Agent's raw response, not file content):
    - Missing status → default to "Objection"
    - Missing key points → use the objection list from the response
    - Missing summary → use first 100 chars of response
-   - If a role marks "No objection" but the response contains words like "suggest"/"however"/"but", flag as "⚠️ soft objection" in progress output
+   - If a role marks "No objection" but the response contains actionable change requests (e.g. "应该改为"/"must fix"/"should change to"/"需要修改"), flag as "⚠️ soft objection" in progress output
 
 b) **Write to discussion file** using the Edit tool to append at the end of the file. Find the last line of the file and append after it. Content to append:
 
@@ -225,18 +392,20 @@ c) Append main Claude's response to the discussion file using the Edit tool (app
 {complete proposal}
 ```
 
-d) Use the Edit tool to update the `<!-- discussion_state: ... -->` JSON at the top of the file:
-   - Update `current_round`, `consecutive_no_objection`
-   - Set `proposal_modified`: `true` if any objection was accepted AND the proposal text was changed this round, `false` otherwise
+d) **Update the state file** (`proposal-<timestamp>.state.json`) using the Write tool (overwrite with updated JSON). Write order: **always write the discussion file first (step c), then the state file (step d)** — because state can be inferred from the discussion file if needed.
+
+   Update the following fields:
+   - `current_round`, `consecutive_no_objection`
+   - `proposal_modified`: `true` if any objection was accepted AND the proposal text was changed this round, `false` otherwise
    - If `proposal_modified == true`: increment `proposal_version`
-   - Update each role's state:
+   - Each role's state:
      - `status`: "objection" / "no objection" / "sleeping"
      - `consecutive_no_objection`: increment if No objection, reset to 0 if Objection, unchanged if sleeping
      - `sleeping`: set based on Step 0.5 rules for next round
      - `last_reviewed_version`: set to current `proposal_version` if the role was active this round
      - `sleep_since_round`: set to current round when entering sleep, null when awake
-   - Maintain `unresolved_issues` array (accepted → resolved, rejected → rejected+reason, not fully addressed → ongoing)
-   - Remove entries from the array that have been resolved/rejected for more than 2 rounds (full records remain in the discussion file)
+   - `unresolved_issues` array (accepted → resolved, rejected → rejected+reason, not fully addressed → ongoing). Remove entries resolved/rejected for more than 2 rounds.
+   - `decision_log` array: for each objection responded to this round, append `{"round": N, "role": "<role>", "issue": "<issue text>", "decision": "accept/reject", "summary": "<1-2 sentence reasoning>"}`. **Growth control:** keep last 3 rounds' entries in full; for older entries, keep `round`, `role`, `issue`, and `decision` but remove `summary`.
 
 **Step 3 — Progress output and convergence check**
 
@@ -248,26 +417,26 @@ a) Output this round's progress:
 b) Convergence check (purely structural rule — main Claude cannot override):
    - All **active** roles have no objection → `consecutive_no_objection += 1`
    - Any role has an objection → `consecutive_no_objection = 0`
-   - **Standard convergence**: `consecutive_no_objection >= 2` → enter Phase 3
+   - **Standard convergence**: `consecutive_no_objection >= 2` → enter Finalize
    - **Fast convergence** (all conditions must be met):
      1. `proposal_modified == false` for the last 2+ consecutive rounds
      2. All active roles said "No objection" this round
      3. ALL roles (including sleeping ones) have `last_reviewed_version >= proposal_version` (every role has seen the current proposal)
      - If condition 3 fails: wake up roles that haven't reviewed the current version, run one more round with them, then re-check
-   - Reached max-rounds → enter Phase 3
+   - Reached max-rounds → enter Finalize
    - **Cross-check before convergence**: before declaring convergence, use the Grep tool to extract the raw status lines from the most recent round in the discussion file and compare with the parsed results in memory. If they don't match, trust the file.
 
 c) Context management (maintained in main Claude's memory, do not modify discussion file):
    - Discussion file is **append-only** — no in-place compression, preserves complete record
    - Main Claude's own context: keep latest complete proposal + last 2 rounds of discussion
-   - Earlier round information: obtain from `unresolved_issues` in discussion_state, no need to re-read file
+   - Earlier round information: obtain from `unresolved_issues` and `decision_log` in the state file, no need to re-read the full discussion file
    - Agent side: freshly launched each round, only receives the current round's prompt
 
 round += 1, continue loop.
 
-## Phase 3: Final Proposal
+## Finalize: Final Proposal
 
-1. **Pre-write quality gate** — self-review before writing the final proposal:
+1. **Pre-write quality gate** — read the state file (`proposal-<timestamp>.state.json`) and self-review before writing the final proposal:
    - Check for internal consistency (contradictions?)
    - Check that all accepted changes from discussion are reflected
    - Check that no "ongoing" issues remain in `unresolved_issues`
